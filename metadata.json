@@ -1,0 +1,6 @@
+{
+  "name": "Finance Tracker",
+  "description": "A beautiful and intuitive single-screen application to record and analyze income and expenses with real-time stats and visual charts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
