@@ -13,71 +13,43 @@ const PORT = Number(process.env.PORT) || 3000;
 // Body parsing with raised limit for base64 images
 app.use(express.json({ limit: "15mb" }));
 
-// Server-side Local Persistence DB configuration
-const TRANSACTIONS_FILE = path.join(process.cwd(), "src", "data", "user_added_transactions.json");
-const BUDGETS_FILE = path.join(process.cwd(), "src", "data", "user_added_budgets.json");
+// Firebase web API key (public) used to verify user ID tokens against
+// Google Identity Toolkit, so AI endpoints can't be abused anonymously.
+const firebaseWebApiKey: string = (() => {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(process.cwd(), "firebase-applet-config.json"), "utf-8"));
+    return cfg.apiKey || "";
+  } catch {
+    return "";
+  }
+})();
 
-// Ensure data directory exists
-const dataDir = path.dirname(TRANSACTIONS_FILE);
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+/**
+ * Verifies a Firebase ID token from the Authorization: Bearer header.
+ * Returns the user info object on success, or null if missing/invalid.
+ */
+async function verifyFirebaseToken(req: express.Request): Promise<any | null> {
+  const authHeader = req.headers.authorization || "";
+  const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  if (!idToken || !firebaseWebApiKey) return null;
+
+  try {
+    const resp = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseWebApiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken }),
+      }
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.users?.[0] || null;
+  } catch (err) {
+    console.error("Token verification failed:", err);
+    return null;
+  }
 }
-
-// REST APIs for persistent transactions
-app.get("/api/db/transactions", (req, res) => {
-  try {
-    if (fs.existsSync(TRANSACTIONS_FILE)) {
-      const data = fs.readFileSync(TRANSACTIONS_FILE, "utf-8");
-      return res.json(JSON.parse(data));
-    }
-    return res.json([]);
-  } catch (err: any) {
-    console.error("Failed to read user_added_transactions.json:", err);
-    return res.status(500).json({ error: "Failed to read transactions database" });
-  }
-});
-
-app.post("/api/db/transactions", (req, res) => {
-  try {
-    const transactions = req.body;
-    if (!Array.isArray(transactions)) {
-      return res.status(400).json({ error: "Invalid data format. Expected an array of transactions." });
-    }
-    fs.writeFileSync(TRANSACTIONS_FILE, JSON.stringify(transactions, null, 2), "utf-8");
-    return res.json({ success: true });
-  } catch (err: any) {
-    console.error("Failed to write user_added_transactions.json:", err);
-    return res.status(500).json({ error: "Failed to save transactions database" });
-  }
-});
-
-// REST APIs for persistent budgets
-app.get("/api/db/budgets", (req, res) => {
-  try {
-    if (fs.existsSync(BUDGETS_FILE)) {
-      const data = fs.readFileSync(BUDGETS_FILE, "utf-8");
-      return res.json(JSON.parse(data));
-    }
-    return res.json([]);
-  } catch (err: any) {
-    console.error("Failed to read user_added_budgets.json:", err);
-    return res.status(500).json({ error: "Failed to read budgets database" });
-  }
-});
-
-app.post("/api/db/budgets", (req, res) => {
-  try {
-    const budgets = req.body;
-    if (!Array.isArray(budgets)) {
-      return res.status(400).json({ error: "Invalid data format. Expected an array of budgets." });
-    }
-    fs.writeFileSync(BUDGETS_FILE, JSON.stringify(budgets, null, 2), "utf-8");
-    return res.json({ success: true });
-  } catch (err: any) {
-    console.error("Failed to write user_added_budgets.json:", err);
-    return res.status(500).json({ error: "Failed to save budgets database" });
-  }
-});
 
 // GoogleGenAI is initialized dynamically within endpoints as needed to support custom user-provided API keys and prevent startup crashes when keys are missing.
 
@@ -87,6 +59,14 @@ app.post("/api/ai/test-key", async (req, res) => {
     const { provider = 'gemini', apiKey, model } = req.body;
 
     if (provider === 'gemini') {
+      // Using the server's own Gemini key requires a signed-in user;
+      // callers supplying their own key spend their own quota.
+      if (!apiKey?.trim()) {
+        const authedUser = await verifyFirebaseToken(req);
+        if (!authedUser) {
+          return res.status(401).json({ success: false, error: 'Sign in required to use the built-in Gemini key, or provide your own API key.' });
+        }
+      }
       const keyToUse = apiKey?.trim() || process.env.GEMINI_API_KEY;
       if (!keyToUse) {
         return res.status(400).json({ success: false, error: 'Gemini API Key is missing.' });
@@ -282,6 +262,14 @@ ${forcedType ? `The type MUST be strictly '${forcedType}'.` : ''}`;
 
     // 1. GOOGLE GEMINI
     if (provider === 'gemini') {
+      // Server env key is reserved for authenticated users to prevent
+      // anonymous quota theft; custom keys spend the caller's own quota.
+      if (!customKey) {
+        const authedUser = await verifyFirebaseToken(req);
+        if (!authedUser) {
+          return res.status(401).json({ error: "Sign in required to use the built-in AI, or add your own API key in Settings." });
+        }
+      }
       const apiKeyToUse = customKey || process.env.GEMINI_API_KEY;
       if (!apiKeyToUse) {
         return res.status(500).json({ error: "Gemini API key is missing." });
@@ -457,71 +445,6 @@ ${forcedType ? `The type MUST be strictly '${forcedType}'.` : ''}`;
   } catch (error: any) {
     console.error("AI Parsing Error:", error);
     res.status(500).json({ error: error.message || "Failed to process transaction using selected AI Provider." });
-  }
-});
-
-// Store verification codes in memory: email -> { code: string, expiresAt: number }
-const nukeCodes = new Map<string, { code: string; expiresAt: number }>();
-
-app.post("/api/send-nuke-code", (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email || typeof email !== "string") {
-      return res.status(400).json({ error: "Email is required" });
-    }
-
-    // Generate a secure 6-digit code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
-
-    nukeCodes.set(email.toLowerCase().trim(), { code, expiresAt });
-
-    // Print the code clearly in the server terminal logs so developers can see it
-    console.log(`\n======================================================`);
-    console.log(`[EMAIL OUTBOX] Sent verification code to: ${email}`);
-    console.log(`Verification Code: ${code}`);
-    console.log(`Expires in: 10 minutes`);
-    console.log(`======================================================\n`);
-
-    return res.json({ 
-      success: true, 
-      message: `Verification code sent to ${email} (Simulated). Code: ${code}` 
-    });
-  } catch (err: any) {
-    console.error("Failed to send nuke code:", err);
-    return res.status(500).json({ error: "Failed to send nuke verification code" });
-  }
-});
-
-app.post("/api/verify-nuke-code", (req, res) => {
-  try {
-    const { email, code } = req.body;
-    if (!email || !code) {
-      return res.status(400).json({ error: "Email and verification code are required" });
-    }
-
-    const key = email.toLowerCase().trim();
-    const record = nukeCodes.get(key);
-
-    if (!record) {
-      return res.status(400).json({ error: "No verification code requested for this email" });
-    }
-
-    if (Date.now() > record.expiresAt) {
-      nukeCodes.delete(key);
-      return res.status(400).json({ error: "Verification code has expired. Please request a new one." });
-    }
-
-    if (record.code !== code.trim()) {
-      return res.status(400).json({ error: "Incorrect verification code. Please check and try again." });
-    }
-
-    // Code matches! Clear it from memory and return success
-    nukeCodes.delete(key);
-    return res.json({ success: true });
-  } catch (err: any) {
-    console.error("Failed to verify nuke code:", err);
-    return res.status(500).json({ error: "Failed to verify code" });
   }
 });
 

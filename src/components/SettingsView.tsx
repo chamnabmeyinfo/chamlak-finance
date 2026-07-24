@@ -44,64 +44,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [showNukeModal, setShowNukeModal] = useState(false);
   const [nukeConfirmInput, setNukeConfirmInput] = useState('');
 
-  const [nukeEmail, setNukeEmail] = useState(user?.email || settings.supportEmail || 'guest@chamlackmedia.com');
-  const [isSendingCode, setIsSendingCode] = useState(false);
-  const [codeSent, setCodeSent] = useState(false);
-  const [verificationCode, setVerificationCode] = useState('');
-  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
-  const [verified, setVerified] = useState(false);
-
-  const handleSendCode = async () => {
-    if (!nukeEmail) {
-      triggerToast('Please enter a valid email address.');
-      return;
-    }
-    setIsSendingCode(true);
-    try {
-      const response = await fetch('/api/send-nuke-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: nukeEmail }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to send code');
-      }
-      setCodeSent(true);
-      triggerToast(`📩 Verification code sent! Check server terminal console log.`);
-    } catch (err: any) {
-      console.error(err);
-      triggerToast(err.message || 'Error sending code.');
-    } finally {
-      setIsSendingCode(false);
-    }
-  };
-
-  const handleVerifyCode = async () => {
-    if (!verificationCode) {
-      triggerToast('Please enter the 6-digit verification code.');
-      return;
-    }
-    setIsVerifyingCode(true);
-    try {
-      const response = await fetch('/api/verify-nuke-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: nukeEmail, code: verificationCode }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to verify code');
-      }
-      setVerified(true);
-      triggerToast('✅ Verification code verified successfully! Type NUKE to proceed.');
-    } catch (err: any) {
-      console.error(err);
-      triggerToast(err.message || 'Incorrect or expired code. Please check and try again.');
-    } finally {
-      setIsVerifyingCode(false);
-    }
-  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const defaultAllowedTypes = ['.jpg', '.jpeg', '.png', '.webp', '.pdf', '.txt', '.csv', '.doc', '.docx', '.xls', '.xlsx'];

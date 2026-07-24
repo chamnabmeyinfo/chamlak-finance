@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Transaction, TransactionType, INCOME_CATEGORIES, EXPENSE_CATEGORIES, PAYMENT_METHODS } from '../types';
 import { CategoryIcon } from './CategoryIcon';
 import { getStoredAIConfig, AI_PROVIDERS } from '../lib/aiProviderConfig';
+import { getAuthHeader } from '../lib/firebase';
 import { formatAmount } from '../utils/currency';
 
 interface SmartAIScannerProps {
@@ -161,6 +162,7 @@ export const SmartAIScanner: React.FC<SmartAIScannerProps> = ({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(await getAuthHeader()),
         },
         body: JSON.stringify({
           text: textPrompt.trim() || undefined,

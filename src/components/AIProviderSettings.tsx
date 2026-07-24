@@ -7,6 +7,7 @@ import {
   getStoredAIConfig,
   saveStoredAIConfig,
 } from '../lib/aiProviderConfig';
+import { getAuthHeader } from '../lib/firebase';
 
 interface AIProviderSettingsProps {
   triggerToast: (msg: string) => void;
@@ -43,6 +44,7 @@ export const AIProviderSettings: React.FC<AIProviderSettingsProps> = ({ triggerT
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(await getAuthHeader()),
         },
         body: JSON.stringify({
           provider: config.provider,

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { CategoryIcon } from './CategoryIcon';
 import { CurrencyCode, formatAmount } from '../utils/currency';
 import { Transaction } from '../types';
+import { getAuthHeader } from '../lib/firebase';
 
 interface QuickNoteModalProps {
   isOpen: boolean;
@@ -130,6 +131,7 @@ export const QuickNoteModal: React.FC<QuickNoteModalProps> = ({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(await getAuthHeader()),
         },
         body: JSON.stringify({
           text: noteText.trim(),

@@ -67,29 +67,6 @@ export default function App() {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
-  const syncOfflineTransactionsToServer = async (txs: Transaction[]) => {
-    try {
-      await fetch('/api/db/transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(txs),
-      });
-    } catch (err) {
-      console.warn('Failed to sync guest transactions to server:', err);
-    }
-  };
-
-  const syncOfflineBudgetsToServer = async (bgts: Budget[]) => {
-    try {
-      await fetch('/api/db/budgets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bgts),
-      });
-    } catch (err) {
-      console.warn('Failed to sync guest budgets to server:', err);
-    }
-  };
   const [showNotification, setShowNotification] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshCount, setRefreshCount] = useState(0);
@@ -172,12 +149,16 @@ export default function App() {
   useEffect(() => {
     if (!user || user.uid === 'offline-user') return;
     const timer = setTimeout(() => {
+      // Secrets (AI API keys, Telegram bot token) stay in this browser only —
+      // never uploaded to Firestore.
+      const { apiKey: _omitKey, ...aiConfigSafe } = getStoredAIConfig();
+      const { botToken: _omitToken, ...telegramConfigSafe } = getTelegramConfig();
       saveUserSettingsToFirestore(user.uid, {
         theme,
         currency,
         appSettings: settings,
-        aiConfig: getStoredAIConfig(),
-        telegramConfig: getTelegramConfig(),
+        aiConfig: aiConfigSafe,
+        telegramConfig: telegramConfigSafe,
       });
     }, 600);
     return () => clearTimeout(timer);
@@ -395,88 +376,45 @@ export default function App() {
     }
 
     if (user.uid === 'offline-user') {
-      // Offline Guest Mode with persistent server-side JSON storage sync
-      const initOfflineMode = async () => {
-        let localTxs: Transaction[] = [];
-        let localBudgets: Budget[] = [];
-        let hasServerData = false;
+      // Offline Guest Mode — data lives in this browser's localStorage only
+      let localTxs: Transaction[] = [];
+      let localBudgets: Budget[] = [];
 
-        // 1. Try fetching from server-side JSON database first (survives client-side clear/reload)
+      const offlineInitialized = localStorage.getItem('finance_tracker_offline_initialized');
+      const offlineRaw = localStorage.getItem('finance_tracker_offline_txs');
+
+      if (!offlineInitialized && offlineRaw === null) {
+        localTxs = SAMPLE_TRANSACTIONS;
+        localStorage.setItem('finance_tracker_offline_txs', JSON.stringify(SAMPLE_TRANSACTIONS));
+        localStorage.setItem('finance_tracker_offline_initialized', 'true');
+      } else {
         try {
-          const [txsResp, budgetsResp] = await Promise.all([
-            fetch("/api/db/transactions"),
-            fetch("/api/db/budgets")
-          ]);
-          
-          if (txsResp.ok) {
-            const serverTxs = await txsResp.json();
-            if (Array.isArray(serverTxs) && serverTxs.length > 0) {
-              localTxs = serverTxs;
-              localStorage.setItem('finance_tracker_offline_txs', JSON.stringify(serverTxs));
-              localStorage.setItem('finance_tracker_offline_initialized', 'true');
-              hasServerData = true;
-            }
-          }
-          
-          if (budgetsResp.ok) {
-            const serverBudgets = await budgetsResp.json();
-            if (Array.isArray(serverBudgets) && serverBudgets.length > 0) {
-              localBudgets = serverBudgets;
-              localStorage.setItem('finance_tracker_offline_budgets', JSON.stringify(serverBudgets));
-            }
-          }
-        } catch (err) {
-          console.warn("Failed to load transactions/budgets backup from server:", err);
+          localTxs = offlineRaw ? JSON.parse(offlineRaw) : [];
+          if (!Array.isArray(localTxs)) localTxs = [];
+        } catch (e) {
+          localTxs = [];
         }
+      }
 
-        // 2. Fallback to LocalStorage if server didn't have data
-        if (!hasServerData) {
-          const offlineInitialized = localStorage.getItem('finance_tracker_offline_initialized');
-          const offlineRaw = localStorage.getItem('finance_tracker_offline_txs');
-          
-          if (!offlineInitialized && offlineRaw === null) {
-            localTxs = SAMPLE_TRANSACTIONS;
-            localStorage.setItem('finance_tracker_offline_txs', JSON.stringify(SAMPLE_TRANSACTIONS));
-            localStorage.setItem('finance_tracker_offline_initialized', 'true');
-            // Save to server-side backup
-            await syncOfflineTransactionsToServer(SAMPLE_TRANSACTIONS);
-          } else {
-            try {
-              localTxs = offlineRaw ? JSON.parse(offlineRaw) : [];
-              if (!Array.isArray(localTxs)) localTxs = [];
-            } catch (e) {
-              localTxs = [];
-            }
-          }
+      const localBudgetsRaw = localStorage.getItem('finance_tracker_offline_budgets');
+      if (!offlineInitialized && localBudgetsRaw === null) {
+        localBudgets = DEFAULT_BUDGETS;
+        localStorage.setItem('finance_tracker_offline_budgets', JSON.stringify(DEFAULT_BUDGETS));
+      } else {
+        try {
+          localBudgets = localBudgetsRaw ? JSON.parse(localBudgetsRaw) : [];
+        } catch (e) {
+          localBudgets = [];
         }
+      }
 
-        if (localBudgets.length === 0) {
-          const localBudgetsRaw = localStorage.getItem('finance_tracker_offline_budgets');
-          const offlineInitialized = localStorage.getItem('finance_tracker_offline_initialized');
-          if (!offlineInitialized && localBudgetsRaw === null) {
-            localBudgets = DEFAULT_BUDGETS;
-            localStorage.setItem('finance_tracker_offline_budgets', JSON.stringify(DEFAULT_BUDGETS));
-            await syncOfflineBudgetsToServer(DEFAULT_BUDGETS);
-          } else {
-            try {
-              localBudgets = localBudgetsRaw ? JSON.parse(localBudgetsRaw) : [];
-            } catch (e) {
-              localBudgets = [];
-            }
-          }
-        }
-
-        const { updatedTxs, count } = processRecurringTransactions(localTxs);
-        if (count > 0) {
-          localStorage.setItem('finance_tracker_offline_txs', JSON.stringify(updatedTxs));
-          await syncOfflineTransactionsToServer(updatedTxs);
-          triggerToast(`Auto-generated ${count} recurring transaction(s) due.`);
-        }
-        setTransactions(updatedTxs);
-        setBudgets(localBudgets);
-      };
-
-      initOfflineMode();
+      const { updatedTxs, count } = processRecurringTransactions(localTxs);
+      if (count > 0) {
+        localStorage.setItem('finance_tracker_offline_txs', JSON.stringify(updatedTxs));
+        triggerToast(`Auto-generated ${count} recurring transaction(s) due.`);
+      }
+      setTransactions(updatedTxs);
+      setBudgets(localBudgets);
       return;
     }
 
@@ -628,10 +566,13 @@ export default function App() {
             });
           }
           if (cloudAiConfig) {
-            saveStoredAIConfig(cloudAiConfig);
+            // Cloud config never contains secrets — keep this browser's stored key
+            const localAi = getStoredAIConfig();
+            saveStoredAIConfig({ ...localAi, ...cloudAiConfig, apiKey: localAi.apiKey });
           }
           if (cloudTelegramConfig) {
-            saveTelegramConfig(cloudTelegramConfig);
+            const localTg = getTelegramConfig();
+            saveTelegramConfig({ ...localTg, ...cloudTelegramConfig, botToken: localTg.botToken });
           }
         }
       }
@@ -685,7 +626,6 @@ export default function App() {
         }
         setTransactions(updatedTxsList);
         localStorage.setItem('finance_tracker_offline_txs', JSON.stringify(updatedTxsList));
-        await syncOfflineTransactionsToServer(updatedTxsList);
         checkAndAutoSync(updatedTxsList);
         notifyTelegramIfEnabled(savedTx);
         return;
@@ -735,7 +675,6 @@ export default function App() {
       if (user.uid === 'offline-user') {
         setTransactions(filtered);
         localStorage.setItem('finance_tracker_offline_txs', JSON.stringify(filtered));
-        await syncOfflineTransactionsToServer(filtered);
         triggerToast('Transaction deleted.');
         if (editingTransaction?.id === id) {
           setEditingTransaction(null);
@@ -766,7 +705,6 @@ export default function App() {
         const updatedBudgets = budgets.map(b => b.category === category ? { ...b, limit } : b);
         setBudgets(updatedBudgets);
         localStorage.setItem('finance_tracker_offline_budgets', JSON.stringify(updatedBudgets));
-        await syncOfflineBudgetsToServer(updatedBudgets);
         triggerToast(`Budget for category updated to ${formatAmountNoCents(limit, currency)}.`);
         return;
       }
@@ -826,8 +764,6 @@ export default function App() {
           setBudgets(DEFAULT_BUDGETS);
           localStorage.setItem('finance_tracker_offline_txs', JSON.stringify(SAMPLE_TRANSACTIONS));
           localStorage.setItem('finance_tracker_offline_budgets', JSON.stringify(DEFAULT_BUDGETS));
-          await syncOfflineTransactionsToServer(SAMPLE_TRANSACTIONS);
-          await syncOfflineBudgetsToServer(DEFAULT_BUDGETS);
           setEditingTransaction(null);
           triggerToast('Database reset to sample data.');
           return;
@@ -852,7 +788,6 @@ export default function App() {
           setTransactions([]);
           localStorage.setItem('finance_tracker_offline_txs', JSON.stringify([]));
           localStorage.setItem('finance_tracker_offline_initialized', 'true');
-          await syncOfflineTransactionsToServer([]);
           setEditingTransaction(null);
           triggerToast('All records cleared.');
           return;
@@ -879,8 +814,6 @@ export default function App() {
         localStorage.setItem('finance_tracker_offline_txs', JSON.stringify([]));
         localStorage.setItem('finance_tracker_offline_budgets', JSON.stringify([]));
         localStorage.setItem('finance_tracker_offline_initialized', 'true');
-        await syncOfflineTransactionsToServer([]);
-        await syncOfflineBudgetsToServer([]);
       } else {
         const cachedTxsKey = `finance_tracker_cloud_txs_${user.uid}`;
         const cachedBudgetsKey = `finance_tracker_cloud_budgets_${user.uid}`;
