@@ -8,7 +8,7 @@ import fs from "fs";
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Body parsing with raised limit for base64 images
 app.use(express.json({ limit: "15mb" }));

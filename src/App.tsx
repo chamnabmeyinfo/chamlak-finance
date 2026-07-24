@@ -14,7 +14,16 @@ import { QuickNoteModal } from './components/QuickNoteModal';
 import { SettingsView } from './components/SettingsView';
 import { MonthlyFinancialReport } from './components/MonthlyFinancialReport';
 import { CategoryIcon } from './components/CategoryIcon';
-import { auth, googleProvider, signInWithPopup, signOut } from './lib/firebase';
+import {
+  auth,
+  googleProvider,
+  signInWithPopup,
+  signOut,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updateProfile,
+} from './lib/firebase';
 import { onAuthStateChanged, User, GoogleAuthProvider } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from './lib/firebase';
@@ -911,6 +920,23 @@ export default function App() {
     }
   };
 
+  const handleEmailSignIn = async (email: string, password: string) => {
+    await signInWithEmailAndPassword(auth, email, password);
+    triggerToast('Signed in successfully!');
+  };
+
+  const handleEmailSignUp = async (email: string, password: string, displayName: string) => {
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    if (displayName) {
+      await updateProfile(cred.user, { displayName });
+    }
+    triggerToast('Account created successfully!');
+  };
+
+  const handlePasswordReset = async (email: string) => {
+    await sendPasswordResetEmail(auth, email);
+  };
+
   const handleSignOut = async () => {
     try {
       if (user?.uid === 'offline-user') {
@@ -1023,8 +1049,11 @@ export default function App() {
 
   if (!user) {
     return (
-      <LoginView 
-        onSignIn={handleSignIn} 
+      <LoginView
+        onSignIn={handleSignIn}
+        onEmailSignIn={handleEmailSignIn}
+        onEmailSignUp={handleEmailSignUp}
+        onPasswordReset={handlePasswordReset}
         onContinueAsGuest={() => {
           localStorage.setItem('finance_tracker_is_guest', 'true');
           setUser({

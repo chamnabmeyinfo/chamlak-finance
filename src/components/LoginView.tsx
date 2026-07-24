@@ -4,10 +4,19 @@ import { CategoryIcon } from './CategoryIcon';
 interface LoginViewProps {
   onSignIn: () => void;
   onContinueAsGuest: () => void;
+  onEmailSignIn: (email: string, password: string) => Promise<void>;
+  onEmailSignUp: (email: string, password: string, displayName: string) => Promise<void>;
+  onPasswordReset: (email: string) => Promise<void>;
 }
 
-export const LoginView: React.FC<LoginViewProps> = ({ onSignIn, onContinueAsGuest }) => {
+export const LoginView: React.FC<LoginViewProps> = ({ onSignIn, onContinueAsGuest, onEmailSignIn, onEmailSignUp, onPasswordReset }) => {
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSignIn = async () => {
     setIsSigningIn(true);
@@ -17,6 +26,47 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSignIn, onContinueAsGues
       console.error('Sign-in error:', error);
     } finally {
       setIsSigningIn(false);
+    }
+  };
+
+  const handleEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+
+    if (!email.trim() || !password.trim()) {
+      setFormError('Email and password are required.');
+      return;
+    }
+    if (mode === 'signup' && password.length < 6) {
+      setFormError('Password must be at least 6 characters.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      if (mode === 'signup') {
+        await onEmailSignUp(email.trim(), password, name.trim());
+      } else {
+        await onEmailSignIn(email.trim(), password);
+      }
+    } catch (error: any) {
+      setFormError(error?.message || 'Authentication failed. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      setFormError('Enter your email above first, then click "Forgot password?".');
+      return;
+    }
+    setFormError(null);
+    try {
+      await onPasswordReset(email.trim());
+      setFormError('Password reset email sent. Check your inbox.');
+    } catch (error: any) {
+      setFormError(error?.message || 'Failed to send reset email.');
     }
   };
 
@@ -81,6 +131,76 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSignIn, onContinueAsGues
               <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">Create smart limits per category to safeguard your net savings rate.</p>
             </div>
           </div>
+        </div>
+
+        {/* Email / Password Form */}
+        <form onSubmit={handleEmailSubmit} className="space-y-3 mb-4">
+          {mode === 'signup' && (
+            <input
+              type="text"
+              placeholder="Full name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full px-4 py-3 text-xs font-semibold bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition"
+            />
+          )}
+          <input
+            type="email"
+            placeholder="Email address"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className="w-full px-4 py-3 text-xs font-semibold bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition"
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            className="w-full px-4 py-3 text-xs font-semibold bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition"
+          />
+
+          {formError && (
+            <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 px-1">{formError}</p>
+          )}
+
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-slate-800 dark:bg-slate-100 hover:bg-slate-700 dark:hover:bg-white text-white dark:text-slate-900 disabled:opacity-75 rounded-2xl text-xs font-bold transition duration-200 cursor-pointer shadow-md"
+          >
+            <CategoryIcon name={mode === 'signup' ? 'UserPlus' : 'LogIn'} size={16} />
+            {isSubmitting ? 'Please wait...' : mode === 'signup' ? 'Create Account' : 'Sign In'}
+          </button>
+
+          <div className="flex items-center justify-between px-1">
+            <button
+              type="button"
+              onClick={() => {
+                setMode(mode === 'signin' ? 'signup' : 'signin');
+                setFormError(null);
+              }}
+              className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+            >
+              {mode === 'signin' ? "New here? Sign up" : 'Already have an account? Sign in'}
+            </button>
+            {mode === 'signin' && (
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                className="text-[11px] font-semibold text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"
+              >
+                Forgot password?
+              </button>
+            )}
+          </div>
+        </form>
+
+        <div className="flex items-center gap-3 mb-4">
+          <div className="flex-1 h-px bg-slate-100 dark:bg-slate-800" />
+          <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Or</span>
+          <div className="flex-1 h-px bg-slate-100 dark:bg-slate-800" />
         </div>
 
         {/* Secure login action */}

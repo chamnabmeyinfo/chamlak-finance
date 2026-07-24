@@ -1,6 +1,15 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updateProfile,
+} from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase
@@ -20,4 +29,15 @@ googleProvider.setCustomParameters({
 googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
 googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
 
-export { app, db, auth, googleProvider, signInWithPopup, signOut };
+export {
+  app,
+  db,
+  auth,
+  googleProvider,
+  signInWithPopup,
+  signOut,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updateProfile,
+};
