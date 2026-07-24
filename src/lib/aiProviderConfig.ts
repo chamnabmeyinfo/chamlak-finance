@@ -106,3 +106,19 @@ export const getStoredAIConfig = (): UserAIConfig => {
 export const saveStoredAIConfig = (config: UserAIConfig) => {
   localStorage.setItem('finance_tracker_ai_provider_config', JSON.stringify(config));
 };
+
+/**
+ * Asks the server whether this account may use the built-in Gemini key.
+ * Only owner accounts can; everyone else supplies their own provider key.
+ */
+export async function fetchBuiltInKeyAvailable(): Promise<boolean> {
+  try {
+    const { getAuthHeader } = await import('./firebase');
+    const resp = await fetch('/api/ai/capabilities', { headers: await getAuthHeader() });
+    if (!resp.ok) return false;
+    const data = await resp.json();
+    return Boolean(data.builtInKeyAvailable);
+  } catch {
+    return false;
+  }
+}

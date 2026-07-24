@@ -6,6 +6,7 @@ import {
   UserAIConfig,
   getStoredAIConfig,
   saveStoredAIConfig,
+  fetchBuiltInKeyAvailable,
 } from '../lib/aiProviderConfig';
 import { getAuthHeader } from '../lib/firebase';
 
@@ -18,10 +19,22 @@ export const AIProviderSettings: React.FC<AIProviderSettingsProps> = ({ triggerT
   const [showKey, setShowKey] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  // null while the capability check is still in flight
+  const [builtInAvailable, setBuiltInAvailable] = useState<boolean | null>(null);
 
   useEffect(() => {
     saveStoredAIConfig(config);
   }, [config]);
+
+  useEffect(() => {
+    let active = true;
+    fetchBuiltInKeyAvailable().then((available) => {
+      if (active) setBuiltInAvailable(available);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const activeProvider = AI_PROVIDERS[config.provider] || AI_PROVIDERS.gemini;
 
@@ -191,7 +204,7 @@ export const AIProviderSettings: React.FC<AIProviderSettingsProps> = ({ triggerT
           {/* API Key Input */}
           <div className="space-y-1.5">
             <label className="block text-[11px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              API Key {config.provider === 'gemini' ? <span className="text-emerald-600 font-normal">(Optional default ready)</span> : <span className="text-rose-500">*</span>}
+              API Key {config.provider === 'gemini' && builtInAvailable ? <span className="text-emerald-600 font-normal">(Optional default ready)</span> : <span className="text-rose-500">*</span>}
             </label>
             <div className="relative">
               <input
@@ -212,9 +225,17 @@ export const AIProviderSettings: React.FC<AIProviderSettingsProps> = ({ triggerT
                 {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
               </button>
             </div>
-            {config.provider === 'gemini' && !config.apiKey.trim() && (
+            {config.provider === 'gemini' && !config.apiKey.trim() && builtInAvailable === true && (
               <p className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-semibold pt-0.5">
                 <ShieldCheck className="w-3.5 h-3.5" /> Built-in system Gemini key is active.
+              </p>
+            )}
+            {!config.apiKey.trim() && builtInAvailable === false && (
+              <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-start gap-1 font-semibold pt-0.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                <span>
+                  Add your own {activeProvider.name} key to enable AI scanning on this account, then click Verify.
+                </span>
               </p>
             )}
           </div>
@@ -257,7 +278,7 @@ export const AIProviderSettings: React.FC<AIProviderSettingsProps> = ({ triggerT
           <button
             type="button"
             onClick={handleTestKey}
-            disabled={isTesting || (config.provider !== 'gemini' && !config.apiKey.trim())}
+            disabled={isTesting || (!config.apiKey.trim() && !builtInAvailable)}
             className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-3xs transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isTesting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}

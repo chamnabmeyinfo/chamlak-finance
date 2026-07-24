@@ -24,6 +24,14 @@ const firebaseWebApiKey: string = (() => {
   }
 })();
 
+// Accounts permitted to spend the server's own GEMINI_API_KEY, set as a
+// comma-separated OWNER_EMAILS env var. Every other account must supply its
+// own provider key in Settings. Unset means nobody uses the built-in key.
+const OWNER_EMAILS = (process.env.OWNER_EMAILS || "")
+  .split(",")
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
+
 /**
  * Verifies a Firebase ID token from the Authorization: Bearer header.
  * Returns the user info object on success, or null if missing/invalid.
@@ -51,6 +59,25 @@ async function verifyFirebaseToken(req: express.Request): Promise<any | null> {
   }
 }
 
+/**
+ * True only when the request carries a valid token for an owner account and
+ * the server actually has a Gemini key to lend.
+ */
+async function canUseBuiltInKey(req: express.Request): Promise<boolean> {
+  if (OWNER_EMAILS.length === 0 || !process.env.GEMINI_API_KEY) return false;
+  const user = await verifyFirebaseToken(req);
+  const email = (user?.email || "").toLowerCase();
+  return Boolean(email && OWNER_EMAILS.includes(email));
+}
+
+const BYOK_MESSAGE =
+  "This account needs its own AI provider key. Open Settings → AI Provider, paste a key from your chosen provider, and click Verify to activate scanning.";
+
+// Lets the client show accurate messaging about whose key will be spent.
+app.get("/api/ai/capabilities", async (req, res) => {
+  res.json({ builtInKeyAvailable: await canUseBuiltInKey(req) });
+});
+
 // GoogleGenAI is initialized dynamically within endpoints as needed to support custom user-provided API keys and prevent startup crashes when keys are missing.
 
 // API endpoint to test AI provider key
@@ -59,13 +86,9 @@ app.post("/api/ai/test-key", async (req, res) => {
     const { provider = 'gemini', apiKey, model } = req.body;
 
     if (provider === 'gemini') {
-      // Using the server's own Gemini key requires a signed-in user;
-      // callers supplying their own key spend their own quota.
-      if (!apiKey?.trim()) {
-        const authedUser = await verifyFirebaseToken(req);
-        if (!authedUser) {
-          return res.status(401).json({ success: false, error: 'Sign in required to use the built-in Gemini key, or provide your own API key.' });
-        }
+      // Only owner accounts may fall back to the server's key.
+      if (!apiKey?.trim() && !(await canUseBuiltInKey(req))) {
+        return res.status(403).json({ success: false, code: 'BYOK_REQUIRED', error: BYOK_MESSAGE });
       }
       const keyToUse = apiKey?.trim() || process.env.GEMINI_API_KEY;
       if (!keyToUse) {
@@ -262,13 +285,9 @@ ${forcedType ? `The type MUST be strictly '${forcedType}'.` : ''}`;
 
     // 1. GOOGLE GEMINI
     if (provider === 'gemini') {
-      // Server env key is reserved for authenticated users to prevent
-      // anonymous quota theft; custom keys spend the caller's own quota.
-      if (!customKey) {
-        const authedUser = await verifyFirebaseToken(req);
-        if (!authedUser) {
-          return res.status(401).json({ error: "Sign in required to use the built-in AI, or add your own API key in Settings." });
-        }
+      // Only owner accounts may fall back to the server's key.
+      if (!customKey && !(await canUseBuiltInKey(req))) {
+        return res.status(403).json({ code: 'BYOK_REQUIRED', error: BYOK_MESSAGE });
       }
       const apiKeyToUse = customKey || process.env.GEMINI_API_KEY;
       if (!apiKeyToUse) {
