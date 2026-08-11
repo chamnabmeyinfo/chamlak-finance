@@ -1,0 +1,203 @@
+// Prisma Schema for Enterprise Fund Injection & Double-Entry Bookkeeping Engine
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// ENUMS
+// -----------------------------------------------------------------------------
+
+enum InjectionType {
+  EQUITY_FUNDING
+  PERSONAL_INJECTION
+  DEBT_FINANCING
+  INTERCOMPANY_TRANSFER
+  NON_DILUTIVE_CAPITAL
+  WORKING_CAPITAL_ADVANCE
+}
+
+enum InjectionStatus {
+  PENDING
+  AML_HOLD
+  KYC_REQUIRED
+  COMPLETED
+  FAILED
+  REJECTED
+}
+
+enum LedgerAccountType {
+  ASSET_CASH
+  EQUITY_COMMON_STOCK
+  EQUITY_PREFERRED_STOCK
+  EQUITY_OWNERS_CAPITAL
+  LIABILITY_COMMERCIAL_LOAN
+  LIABILITY_VENTURE_DEBT
+  LIABILITY_MCA_ADVANCE
+  LIABILITY_INTERCOMPANY_PAYABLE
+  REVENUE_RESTRICTED_GRANT
+}
+
+enum EntryDirection {
+  DEBIT
+  CREDIT
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// -----------------------------------------------------------------------------
+// CORE MODELS
+// -----------------------------------------------------------------------------
+
+model FundInjection {
+  id               String          @id @default(uuid())
+  idempotencyKey   String          @unique
+  organizationId   String
+  injectionType    InjectionType
+  status           InjectionStatus @default(PENDING)
+  amount           Decimal         @db.Decimal(18, 4)
+  currency         String          @default("USD")
+  counterpartyName String
+  counterpartyId   String?
+  sourceAccount    String
+  destinationAcc   String
+  referenceNote    String?
+  riskLevel        RiskLevel       @default(LOW)
+
+  // Double-Entry Ledger Link
+  ledgerTransactionId String?             @unique
+  ledgerTransaction   LedgerTransaction?  @relation(fields: [ledgerTransactionId], references: [id])
+
+  // Specialized Type Metadatas
+  equityDetail       EquityMetadata?
+  debtSchedule       DebtAmortizationSchedule?
+  intercompanyDetail IntercompanyDetail?
+  grantMilestones    GrantMilestone[]
+  workingCapitalRisk WorkingCapitalRisk?
+
+  // Compliance & Audit
+  complianceLogs ComplianceAuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, injectionType])
+  @@index([status])
+}
+
+model LedgerTransaction {
+  id             String          @id @default(uuid())
+  referenceId    String          @unique
+  description    String
+  transactionDate DateTime       @default(now())
+  entries        LedgerEntry[]
+  injection      FundInjection?
+
+  createdAt DateTime @default(now())
+}
+
+model LedgerEntry {
+  id                  String            @id @default(uuid())
+  ledgerTransactionId String
+  ledgerTransaction   LedgerTransaction @relation(fields: [ledgerTransactionId], references: [id], onDelete: Cascade)
+  accountType         LedgerAccountType
+  accountNumber       String
+  direction           EntryDirection
+  amount              Decimal           @db.Decimal(18, 4)
+  currency            String            @default("USD")
+
+  createdAt DateTime @default(now())
+}
+
+// -----------------------------------------------------------------------------
+// INJECTION TYPE METADATA EXTENSIONS
+// -----------------------------------------------------------------------------
+
+model EquityMetadata {
+  id              String        @id @default(uuid())
+  fundInjectionId String        @unique
+  fundInjection   FundInjection @relation(fields: [fundInjectionId], references: [id], onDelete: Cascade)
+  cartaInvestorId String?
+  shareClass      String        // e.g. "Series A Preferred"
+  pricePerShare   Decimal       @db.Decimal(12, 4)
+  sharesIssued    Int
+  postMoneyVal    Decimal       @db.Decimal(18, 2)
+  dilutionPercent Decimal       @db.Decimal(5, 2)
+}
+
+model DebtAmortizationSchedule {
+  id              String        @id @default(uuid())
+  fundInjectionId String        @unique
+  fundInjection   FundInjection @relation(fields: [fundInjectionId], references: [id], onDelete: Cascade)
+  principalAmount Decimal       @db.Decimal(18, 2)
+  annualRatePct   Decimal       @db.Decimal(5, 2)
+  termMonths      Int
+  monthlyPayment  Decimal       @db.Decimal(18, 2)
+  originationFee  Decimal       @db.Decimal(18, 2)
+  maturityDate    DateTime
+}
+
+model IntercompanyDetail {
+  id                 String        @id @default(uuid())
+  fundInjectionId    String        @unique
+  fundInjection      FundInjection @relation(fields: [fundInjectionId], references: [id], onDelete: Cascade)
+  parentEntity       String
+  subsidiaryEntity   String
+  crossBorder        Boolean       @default(false)
+  sourceCurrency     String
+  targetCurrency     String
+  fxRate             Decimal       @db.Decimal(12, 6)
+  transferPricingTag String        // IRS/OECD Transfer pricing compliance ref
+  taxJurisdiction    String
+}
+
+model GrantMilestone {
+  id              String        @id @default(uuid())
+  fundInjectionId String
+  fundInjection   FundInjection @relation(fields: [fundInjectionId], references: [id], onDelete: Cascade)
+  grantorAgency   String
+  milestoneIndex  Int
+  title           String
+  trancheAmount   Decimal       @db.Decimal(18, 2)
+  isRestricted    Boolean       @default(true)
+  isCompleted     Boolean       @default(false)
+  dueDate         DateTime
+}
+
+model WorkingCapitalRisk {
+  id              String        @id @default(uuid())
+  fundInjectionId String        @unique
+  fundInjection   FundInjection @relation(fields: [fundInjectionId], references: [id], onDelete: Cascade)
+  factorRate      Decimal       @db.Decimal(5, 4) // e.g. 1.15
+  holdbackPct     Decimal       @db.Decimal(5, 2) // e.g. 15% of daily receivables
+  maxApprovedLimit Decimal      @db.Decimal(18, 2)
+  collateralInvoices String[]   // Invoice numbers factored
+  riskEngineScore Int           // 300 - 850
+}
+
+// -----------------------------------------------------------------------------
+// COMPLIANCE AUDIT LOGS
+// -----------------------------------------------------------------------------
+
+model ComplianceAuditLog {
+  id              String        @id @default(uuid())
+  fundInjectionId String
+  fundInjection   FundInjection @relation(fields: [fundInjectionId], references: [id], onDelete: Cascade)
+  actorId         String
+  event           String
+  ruleTriggered   String?
+  amlFlagged      Boolean       @default(false)
+  kycVerified     Boolean       @default(true)
+  metadataJson    String?
+  timestamp       DateTime      @default(now())
+}

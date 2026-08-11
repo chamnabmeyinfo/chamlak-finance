@@ -4,6 +4,8 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import fs from "fs";
+import { FundInjectionService } from "./src/services/fundInjectionService";
+import { ComplianceEngine } from "./src/services/complianceEngine";
 
 dotenv.config();
 
@@ -501,6 +503,95 @@ app.post("/api/import-public-sheet", async (req, res) => {
     console.error("Public Sheet Import Error:", err);
     return res.status(500).json({ error: err.message || "Failed to import public sheet" });
   }
+});
+
+// -----------------------------------------------------------------------------
+// FUND INJECTION API ENDPOINTS
+// -----------------------------------------------------------------------------
+
+// Post new Fund Injection (with double-entry ledger & idempotency check)
+app.post("/api/fund-injections", async (req, res) => {
+  try {
+    const input = req.body;
+    const idempotencyKey = req.headers['x-idempotency-key'] as string || input.idempotencyKey;
+
+    if (!idempotencyKey) {
+      return res.status(400).json({ error: "X-Idempotency-Key header or idempotencyKey property is required." });
+    }
+
+    if (!input.injectionType || !input.amount || !input.counterpartyName) {
+      return res.status(400).json({ error: "Missing required fields: injectionType, amount, counterpartyName" });
+    }
+
+    const record = await FundInjectionService.executeFundInjection({
+      ...input,
+      idempotencyKey
+    });
+
+    return res.status(201).json({ success: true, record });
+  } catch (err: any) {
+    console.error("Fund Injection API Error:", err);
+    return res.status(500).json({ error: err.message || "Failed to process fund injection" });
+  }
+});
+
+// Get all Fund Injections
+app.get("/api/fund-injections", (req, res) => {
+  const records = FundInjectionService.getInjections();
+  return res.json({ success: true, count: records.length, records });
+});
+
+// Compliance Officer Override to clear AML Hold
+app.post("/api/fund-injections/:id/compliance-override", (req, res) => {
+  const { id } = req.params;
+  const { officerNotes } = req.body;
+
+  if (!officerNotes) {
+    return res.status(400).json({ error: "Officer notes are required for compliance override." });
+  }
+
+  const updated = FundInjectionService.approveComplianceHold(id, officerNotes);
+  if (!updated) {
+    return res.status(404).json({ error: "Fund injection record not found." });
+  }
+
+  return res.json({ success: true, record: updated });
+});
+
+// Get Analytics summary for Fund Injections
+app.get("/api/fund-injections/analytics", (req, res) => {
+  const records = FundInjectionService.getInjections();
+
+  const summary = {
+    totalCapitalInjectedUSD: 0,
+    byType: {
+      EQUITY_FUNDING: 0,
+      PERSONAL_INJECTION: 0,
+      DEBT_FINANCING: 0,
+      INTERCOMPANY_TRANSFER: 0,
+      NON_DILUTIVE_CAPITAL: 0,
+      WORKING_CAPITAL_ADVANCE: 0,
+    },
+    amlHolds: 0,
+    completed: 0,
+    compliancePassRatePct: 100,
+  };
+
+  records.forEach((r) => {
+    const amountUSD = r.currency === 'KHR' ? r.amount / 4000 : r.amount;
+    summary.totalCapitalInjectedUSD += amountUSD;
+    if (summary.byType[r.injectionType] !== undefined) {
+      summary.byType[r.injectionType] += amountUSD;
+    }
+    if (r.status === 'AML_HOLD') summary.amlHolds++;
+    if (r.status === 'COMPLETED') summary.completed++;
+  });
+
+  if (records.length > 0) {
+    summary.compliancePassRatePct = Number(((summary.completed / records.length) * 100).toFixed(1));
+  }
+
+  return res.json({ success: true, summary });
 });
 
 // Serve static files / Vite middleware

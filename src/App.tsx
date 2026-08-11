@@ -13,6 +13,7 @@ import { SearchModal } from './components/SearchModal';
 import { QuickNoteModal } from './components/QuickNoteModal';
 import { SettingsView } from './components/SettingsView';
 import { MonthlyFinancialReport } from './components/MonthlyFinancialReport';
+import { FundInjectionModule } from './components/FundInjectionModule';
 import { CategoryIcon } from './components/CategoryIcon';
 import {
   auth,
@@ -965,6 +966,7 @@ export default function App() {
     { id: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard' },
     { id: 'record', label: 'Add Record', icon: 'PlusCircle' },
     { id: 'ledger', label: 'Ledger History', icon: 'History' },
+    { id: 'fund_injections', label: 'Fund Injections', icon: 'ShieldCheck' },
     { id: 'budgets', label: 'Budgets Planner', icon: 'PiggyBank' },
     { id: 'settings', label: 'Settings', icon: 'Settings' },
   ];
@@ -1459,6 +1461,13 @@ export default function App() {
                 currency={currency}
                 triggerToast={triggerToast}
               />
+            </div>
+          )}
+
+          {/* Fund Injections Module Tab view */}
+          {activeTab === 'fund_injections' && (
+            <div className="w-full animate-fade-in" id="fund-injections-tab-view">
+              <FundInjectionModule currency={currency} />
             </div>
           )}
 
